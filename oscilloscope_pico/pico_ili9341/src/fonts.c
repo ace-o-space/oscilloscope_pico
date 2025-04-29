@@ -50,7 +50,7 @@ void ILI9341_SetCursor(ILI9341 *disp, uint16_t x, uint16_t y) {
 void ILI9341_DrawChar(ILI9341 *disp, char c) {
     if (c < 32 || c > 127) return; // Только печатные символы ASCII
     
-    const uint8_t *char_data = &current_font[(c - 32) * font_height];
+    const uint8_t *char_data = &current_font[c * font_height];
     
     // Буфер для строки символа (оптимизация DMA)
     uint16_t pixel_buffer[font_width * font_height];
@@ -119,19 +119,30 @@ void ILI9341_Print(ILI9341 *disp, const char *str) {
 
 //integer to string
 void ILI9341_PrintInteger(ILI9341 *disp, int num) {
-    char buf[16];
-    char *ptr = buf + sizeof(buf) - 1;
-    *ptr = '\0';
+    char buffer[12]; // Достаточно для 32-битного int (-2147483648 до 2147483647)
+    int i = 0;
     
-    int neg = num < 0;
-    if (neg) num = -num;
+    // Обработка отрицательных чисел
+    if (num < 0) {
+        ILI9341_DrawChar(disp, '-');
+        num = -num;
+    }
+    // Обработка нуля отдельно
+    else if (num == 0) {
+        ILI9341_DrawChar(disp, '0');
+        return;
+    }
     
-    do {
-        *--ptr = '0' + (num % 10);
+    // Преобразование числа в строку в обратном порядке
+    while (num > 0) {
+        buffer[i++] = (num % 10) + '0';
         num /= 10;
-    } while (num > 0);
+    }
     
-    if (neg) *--ptr = '-';
+    // Вывод цифр в правильном порядке
+    while (i > 0) {
+        ILI9341_DrawChar(disp, buffer[--i]);
+    }
 }
 
 //вывод float

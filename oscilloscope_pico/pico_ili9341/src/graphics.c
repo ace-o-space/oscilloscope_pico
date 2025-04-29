@@ -179,6 +179,9 @@ void ILI9341_DrawLine(ILI9341 *disp, uint16_t x0, uint16_t y0, uint16_t x1, uint
         }
     }
 }
+void ILI9341_DrawPixel(ILI9341 *disp, uint16_t x, uint16_t y, uint16_t color){
+    ILI9341_DrawLine(disp, x, y, x, y, color);
+}
 
 // Оптимизированное рисование прямоугольника
 void ILI9341_DrawRect(ILI9341 *disp, uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t color) {

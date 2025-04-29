@@ -32,7 +32,7 @@ static uint16_t constrain(uint16_t val, uint16_t min, uint16_t max) {
 }
 
 static bool should_redraw(void) {
-    return absolute_time_diff_us(last_redraw, get_absolute_time()) > 16666; // 60 FPS
+    return absolute_time_diff_us(last_redraw, get_absolute_time()) > 16666; // 120 FPS
 }
 
 /* Публичные функции */
@@ -106,9 +106,18 @@ void process_buttons(void) {
 
 void draw_grid(void) {
     ILI9341_FillScreen(&tft, ILI9341_BLACK);
-    
+    for (uint16_t y = 30; y < 240; y = y + 50) {
+        for (uint16_t x = 10; x < 320; x = x + 5) { 
+            ILI9341_DrawPixel(&tft, x, y, ILI9341_DARKGREY);
+        }
+    }
+    for (uint16_t x = 0; x < 320; x = x + 64) {
+        for (uint16_t y = 40; y < 240; y = y + 10) { 
+            ILI9341_DrawPixel(&tft, x, y, ILI9341_DARKGREY);
+        }
+    }
     // Вертикальные линии
-    for (uint16_t x = 0; x < tft.width; x += 32) {
+    /*for (uint16_t x = 0; x < tft.width; x += 32) {
         ILI9341_DrawLine(&tft, x, 0, x, tft.height, ILI9341_DARKGREY);
     }
     
@@ -120,6 +129,7 @@ void draw_grid(void) {
     // Центральные оси
     ILI9341_DrawLine(&tft, 0, tft.height/2, tft.width, tft.height/2, ILI9341_WHITE);
     ILI9341_DrawLine(&tft, tft.width/2, 0, tft.width/2, tft.height, ILI9341_WHITE);
+    */
 }
 
 void draw_waveform(void) {
@@ -178,21 +188,24 @@ void display_task(void) {
     init_buttons();
     last_redraw = get_absolute_time();
     ILI9341_SetFont(&tft, *font_8x8);
-    ILI9341_SetRotation(&tft, 3);
     while (true) {
-        /*process_buttons();
-        
-        if (should_redraw()) {
+        process_buttons();
+
+        /*if (should_redraw()) {
             draw_grid();
             if (!global_buffer.hold) draw_waveform();
             draw_measurements();
             last_redraw = get_absolute_time();
         }
-        
-        tight_loop_contents();*/
+        */
+        //draw_measurements();
+        tight_loop_contents();
         ILI9341_SetCursor(&tft, 100, 10);
         ILI9341_Print(&tft, "HELLO WORLD!");
-        ILI9341_SetCursor(&tft, 100, 50);
+        ILI9341_SetCursor(&tft, 100, 20);
+        ILI9341_Print(&tft, "hello world!");
+        ILI9341_SetCursor(&tft, 100, 30);
+        ILI9341_Print(&tft, "Dolgoprudny, ");
         ILI9341_PrintInteger(&tft, 2025);
         //ILI9341_DrawLine(&tft, 0, tft.height/2, tft.width, tft.height/2, ILI9341_WHITE);
 
