@@ -105,7 +105,6 @@ void process_buttons(void) {
 }
 
 void draw_grid(void) {
-    ILI9341_FillScreen(&tft, ILI9341_BLACK);
     for (uint16_t y = 30; y < 240; y = y + 50) {
         for (uint16_t x = 10; x < 320; x = x + 5) { 
             ILI9341_DrawPixel(&tft, x, y, ILI9341_DARKGREY);
@@ -116,6 +115,7 @@ void draw_grid(void) {
             ILI9341_DrawPixel(&tft, x, y, ILI9341_DARKGREY);
         }
     }
+
     // Вертикальные линии
     /*for (uint16_t x = 0; x < tft.width; x += 32) {
         ILI9341_DrawLine(&tft, x, 0, x, tft.height, ILI9341_DARKGREY);
@@ -132,13 +132,31 @@ void draw_grid(void) {
     */
 }
 
-void draw_waveform(void) {
-    if (!global_buffer.buffer_ready[global_buffer.read_buffer]) return;
-    
-    uint16_t* buffer = global_buffer.adc_buffers[global_buffer.read_buffer];
+static void get_measurements(float *measurements){
+    measurements[0] = global_buffer.max_value * 3.3f / 4095;
+    measurements[1] = global_buffer.min_value * 3.3f / 4095;
+    measurements[2] = global_buffer.vpp * 3.3f / 4095;
+    measurements[3] = global_buffer.frequency;
+    measurements[4] = global_buffer.duty_cycle;
+}
+
+static void get_current_adc_buffer(uint16_t* buffer){
+    buffer = global_buffer.adc_buffers[global_buffer.read_buffer];
+}
+
+static void get_voltage_constants(float* voltage_constants){
     const float scale = global_buffer.voltage_scale;
     const float offset = global_buffer.voltage_offset;
-    const uint16_t mid_y = tft.height / 2;
+    voltage_constants[0] = scale;
+    voltage_constants[1] = offset;
+}
+
+void draw_waveform(uint16_t *buffer, float* voltage_constants) {
+    if (!global_buffer.buffer_ready[global_buffer.read_buffer]) return;
+
+    const float scale = voltage_constants[0];
+    const float offset = voltage_constants[1];
+    const uint16_t mid_y = (tft.height) / 2;
     
     for (uint16_t i = 1; i < BUFFER_SIZE && i < tft.width; i++) {
         uint16_t y1 = mid_y - (buffer[i-1] - 2048) / 4096.0f * mid_y * scale + offset;
@@ -147,11 +165,20 @@ void draw_waveform(void) {
         y1 = constrain(y1, 0, tft.height-1);
         y2 = constrain(y2, 0, tft.height-1);
         
-        ILI9341_DrawLine(&tft, i-1, y1, i, y2, ILI9341_RED);
+        ILI9341_DrawLine(&tft, i-1, y1 + 30, i, y2 + 30, ILI9341_RED);
     }
 }
 
-void draw_measurements(void) {
+void draw_measurements(float *measurements) {
+
+    /*float measurements[5] = {
+        global_buffer.max_value * 3.3f / 4095,
+        global_buffer.min_value * 3.3f / 4095,
+        global_buffer.vpp * 3.3f / 4095,
+        global_buffer.frequency,
+        global_buffer.duty_cycle
+    };
+    */
     if (!show_measurements) return;
     
     ILI9341_SetTextColor(&tft, ILI9341_WHITE, ILI9341_BLACK);
@@ -159,28 +186,95 @@ void draw_measurements(void) {
 
     // Напряжения
     ILI9341_SetCursor(&tft, 0, 0);
-    ILI9341_Print(&tft, "Vmax: ");
-    ILI9341_PrintFloat(&tft, global_buffer.max_value * 3.3f / 4095, 2);
-
+    ILI9341_Print(&tft, "Vmax,V: ");
+    ILI9341_PrintFloat(&tft, measurements[0], 2);
+    
     ILI9341_SetCursor(&tft, 0, 10);
-    ILI9341_Print(&tft, "Vmin: ");
-    ILI9341_PrintFloat(&tft, global_buffer.min_value * 3.3f / 4095, 2);
+    ILI9341_Print(&tft, "Vmin,V: ");
+    ILI9341_PrintFloat(&tft, measurements[1], 2);
 
     ILI9341_SetCursor(&tft, 0, 20);
-    ILI9341_Print(&tft, "Vpp: ");
-    ILI9341_PrintFloat(&tft, global_buffer.vpp * 3.3f / 4095, 2);
+    ILI9341_Print(&tft, "Vpp,V: ");
+    ILI9341_PrintFloat(&tft, measurements[2], 2);
+
+    // Частота и скважность
+    ILI9341_SetCursor(&tft, 150, 0);
+    ILI9341_Print(&tft, "Freq,Hz: ");
+    char freq_buf[16];
+    snprintf(freq_buf, sizeof(freq_buf), "%d", measurements[3]);
+    ILI9341_Print(&tft, freq_buf);
+
+    ILI9341_SetCursor(&tft, 150, 10);
+    ILI9341_Print(&tft, "Duty,%: ");
+    ILI9341_PrintFloat(&tft, measurements[4], 1);
+}
+
+void erase_measurements(float* measurements){
+    //if (!show_measurements) return;
+    
+    ILI9341_SetTextColor(&tft, ILI9341_BLACK, ILI9341_BLACK);
+    ILI9341_SetTextSize(&tft, 1);
+
+    // Напряжения
+    ILI9341_SetCursor(&tft, 0, 0);
+    ILI9341_Print(&tft, "Vmax, V: ");
+    ILI9341_PrintFloat(&tft, measurements[0], 2);
+    
+    ILI9341_SetCursor(&tft, 0, 10);
+    ILI9341_Print(&tft, "Vmin, V: ");
+    ILI9341_PrintFloat(&tft, measurements[1], 2);
+
+    ILI9341_SetCursor(&tft, 0, 20);
+    ILI9341_Print(&tft, "Vpp, V: ");
+    ILI9341_PrintFloat(&tft, measurements[2], 2);
 
     // Частота и скважность
     ILI9341_SetCursor(&tft, 100, 0);
-    ILI9341_Print(&tft, "Freq: ");
+    ILI9341_Print(&tft, "Freq, Hz: ");
     char freq_buf[16];
-    snprintf(freq_buf, sizeof(freq_buf), "%d", global_buffer.frequency);
+    snprintf(freq_buf, sizeof(freq_buf), "%d", measurements[3]);
     ILI9341_Print(&tft, freq_buf);
 
     ILI9341_SetCursor(&tft, 100, 10);
-    ILI9341_Print(&tft, "Duty: ");
-    ILI9341_PrintFloat(&tft, global_buffer.duty_cycle, 1);
-    ILI9341_Print(&tft, "%");
+    ILI9341_Print(&tft, "Duty, %: ");
+    ILI9341_PrintFloat(&tft, measurements[4], 1);
+}
+
+void erase_waveform(uint16_t* buffer, float *voltage_constants){
+    //if (!global_buffer.buffer_ready[global_buffer.read_buffer]) return;
+
+    const float scale = voltage_constants[0];
+    const float offset = voltage_constants[1];
+    const uint16_t mid_y = (tft.height) / 2;
+    
+    for (uint16_t i = 1; i < BUFFER_SIZE && i < tft.width; i++) {
+        uint16_t y1 = mid_y - (buffer[i-1] - 2048) / 4096.0f * mid_y * scale + offset;
+        uint16_t y2 = mid_y -(buffer[i] - 2048) / 4096.0f * mid_y * scale + offset;
+        
+        y1 = constrain(y1, 0, tft.height-1);
+        y2 = constrain(y2, 0, tft.height-1);
+        
+        ILI9341_DrawLine(&tft, i-1, y1 + 30, i, y2 + 30, ILI9341_BLACK);
+    }
+}
+
+void erase_grid(void){
+    for (uint16_t y = 30; y < 240; y = y + 50) {
+        for (uint16_t x = 10; x < 320; x = x + 5) { 
+            ILI9341_DrawPixel(&tft, x, y, ILI9341_BLACK);
+        }
+    }
+    for (uint16_t x = 0; x < 320; x = x + 64) {
+        for (uint16_t y = 40; y < 240; y = y + 10) { 
+            ILI9341_DrawPixel(&tft, x, y, ILI9341_BLACK);
+        }
+    }
+}
+
+void get_values_for_draw(uint16_t *current_adc_buffer, float *measurements, float *voltage_constants){
+    get_current_adc_buffer(current_adc_buffer);
+    get_measurements(measurements);
+    get_voltage_constants(voltage_constants);
 }
 
 void display_task(void) {
@@ -188,25 +282,35 @@ void display_task(void) {
     init_buttons();
     last_redraw = get_absolute_time();
     ILI9341_SetFont(&tft, *font_8x8);
+
     while (true) {
+        float measurements[5];
+        float voltage_constants[2];
+        uint16_t *current_adc_buffer;
+
+        get_values_for_draw(current_adc_buffer, measurements, voltage_constants);
         process_buttons();
 
-        /*if (should_redraw()) {
-            draw_grid();
-            if (!global_buffer.hold) draw_waveform();
-            draw_measurements();
-            last_redraw = get_absolute_time();
+        draw_grid();
+        draw_measurements(measurements);
+        if (!global_buffer.hold) draw_waveform(current_adc_buffer, voltage_constants);   
+
+        last_redraw = get_absolute_time();
+        if (should_redraw()) {
+            erase_grid();
+            erase_measurements(measurements);
+            erase_waveform(current_adc_buffer, voltage_constants);  
         }
-        */
-        //draw_measurements();
+        
         tight_loop_contents();
-        ILI9341_SetCursor(&tft, 100, 10);
+
+        /*ILI9341_SetCursor(&tft, 100, 10);
         ILI9341_Print(&tft, "HELLO WORLD!");
         ILI9341_SetCursor(&tft, 100, 20);
         ILI9341_Print(&tft, "hello world!");
         ILI9341_SetCursor(&tft, 100, 30);
         ILI9341_Print(&tft, "Dolgoprudny, ");
-        ILI9341_PrintInteger(&tft, 2025);
+        ILI9341_PrintInteger(&tft, 2025);*/
         //ILI9341_DrawLine(&tft, 0, tft.height/2, tft.width, tft.height/2, ILI9341_WHITE);
 
     }

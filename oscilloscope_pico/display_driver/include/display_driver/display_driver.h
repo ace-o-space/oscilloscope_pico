@@ -27,7 +27,15 @@ void display_task(void);
 // Обработка ввода
 void process_buttons(void);
 
+void get_values_for_draw(uint16_t*, float*, float*);
+
 // Функции отрисовки
 void draw_grid(void);
-void draw_waveform(void);
-void draw_measurements(void);
+void draw_measurements(float*);
+void draw_waveform(uint16_t*, float*);
+
+//функции стирания 
+void erase_grid(void);
+void erase_measurements(float*);
+void erase_waveform(uint16_t*, float*);  
+
