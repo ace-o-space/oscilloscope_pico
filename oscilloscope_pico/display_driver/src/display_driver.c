@@ -10,6 +10,8 @@
 #include "hardware/dma.h"
 #include "pico/time.h"
 #include <stdio.h> 
+#include <string.h>
+#include <pico/multicore.h>
 
 #define SPI_PORT spi0
 #define PIN_MISO 12
@@ -21,21 +23,28 @@
 #define PIN_LED  20
 
 /* Глобальные переменные модуля */
-static ILI9341 tft;  // Объект дисплея
+static ILI9341 tft;
 static MenuState menu_state = MENU_NONE;
 static bool show_measurements = true;
-static absolute_time_t last_redraw;
+//static uint16_t frame_buffer[DISPLAY_WIDTH * DISPLAY_HEIGHT];
+//static uint16_t prev_waveform[DISPLAY_WIDTH];
 
-/* Приватные вспомогательные функции */
-static uint16_t constrain(uint16_t val, uint16_t min, uint16_t max) {
-    return (val < min) ? min : (val > max) ? max : val;
-}
+static color8_t* active_buf8 = frame_buf8_1;
+static color8_t* draw_buf8 = frame_buf8_2;
 
-static bool should_redraw(void) {
-    return absolute_time_diff_us(last_redraw, get_absolute_time()) > 16666; // 120 FPS
-}
+static uint16_t screen_buf1[DISPLAY_WIDTH * WAVEFORM_HEIGHT]; // Только область осциллографа
+static uint16_t screen_buf2[DISPLAY_WIDTH * WAVEFORM_HEIGHT];
+static uint16_t* active_buf = screen_buf1;
+static uint16_t prev_waveform[DISPLAY_WIDTH]; // Хранит предыдущие Y-координаты
 
-/* Публичные функции */
+// Двойной буфер экрана (2 отдельных массива)
+//static uint16_t screen_buf1[DISPLAY_WIDTH * DISPLAY_HEIGHT];
+//static uint16_t screen_buf2[DISPLAY_WIDTH * DISPLAY_HEIGHT];
+//static uint16_t screen_buf2[DISPLAY_WIDTH];
+//static uint16_t* active_buf = screen_buf1;  // Указатель на активный буфер
+
+extern void ILI9341_FillRectDMA(ILI9341 *disp, uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t color);
+extern bool adc_get_buffer(uint16_t** buffer);
 
 void display_init(void) {
 
@@ -55,8 +64,174 @@ void display_init(void) {
     // Инициализация дисплея
     ILI9341_Init(&tft, &config);
     ILI9341_SetRotation(&tft, 3);
-    ILI9341_FillScreen(&tft, ILI9341_BLACK);
+    ILI9341_FillScreen8(&tft, COLOR8_BLACK);
+
+    // Очистка буферов
+    memset(frame_buf8_1, COLOR8_BLACK, sizeof(frame_buf8_1));
+    memset(frame_buf8_2, COLOR8_BLACK, sizeof(frame_buf8_2));
+    
+    // Инициализация дисплея
+    ILI9341_Init(&tft, &config);
+    ILI9341_FillScreen8(&tft, color_palette[COLOR8_BLACK]);
 }
+
+void swap_buffers() {
+    // Меняем буферы местами
+    color8_t* temp = active_buf8;
+    active_buf8 = draw_buf8;
+    draw_buf8 = temp;
+    
+    // Конвертируем и выводим
+    ILI9341_DrawBuffer8to16(&tft, active_buf8);
+}
+
+/*
+void swap_buffers(void) {
+    // Переключаем активный буфер
+    active_buf = (active_buf == screen_buf1) ? screen_buf2 : screen_buf1;
+    
+    // Отправляем только область осциллографа
+    ILI9341_DrawBufferDMA(
+        &tft,
+        0, 
+        WAVEFORM_TOP, // Начинаем с Y=30
+        DISPLAY_WIDTH,
+        WAVEFORM_HEIGHT,  // Только 290 строк (320-30)
+        active_buf
+    );
+}
+*/
+
+void draw_grid(void) {
+    for (uint16_t y = 30; y < DISPLAY_WIDTH; y = y + 50) {
+        for (uint16_t x = 10; x < DISPLAY_HEIGHT; x = x + 5) { 
+            ILI9341_DrawPixel(&tft, x, y, COLOR8_GRAY);
+        }
+    }
+    for (uint16_t x = 0; x < 320; x = x + 64) {
+        for (uint16_t y = 40; y < 240; y = y + 10) { 
+            ILI9341_DrawPixel(&tft, x, y, COLOR8_GRAY);
+        }
+    }
+}
+
+void draw_waveform(uint16_t* adc_data) {
+    // 1. Очищаем только область осциллографа
+    memset(draw_buf8 + WAVEFORM_TOP * DISPLAY_WIDTH, 
+           COLOR8_BLACK, 
+           DISPLAY_WIDTH * WAVEFORM_HEIGHT);
+    
+    // 2. Рисуем сигнал
+    for (int x = 0; x < DISPLAY_WIDTH && x < BUFFER_SIZE; x++) {
+        int y = WAVEFORM_TOP + ((4095 - adc_data[x]) * WAVEFORM_HEIGHT / 4096);
+        y = (y < WAVEFORM_TOP) ? WAVEFORM_TOP : 
+            (y >= DISPLAY_HEIGHT) ? DISPLAY_HEIGHT-1 : y;
+        
+        // Пиксель сигнала
+        draw_buf8[y * DISPLAY_WIDTH + x] = COLOR8_RED;
+        
+        // Подсветка (опционально)
+        //if (x % 2 == 0) {
+        //    draw_buf8[(y+1) * DISPLAY_WIDTH + x] = COLOR8_RED;
+        //}
+    }
+    
+    swap_buffers();
+}
+
+/*
+void draw_waveform(uint16_t* adc_buffer) {
+    // Определяем буфер для рисования
+    uint16_t* draw_buf = (active_buf == screen_buf1) ? screen_buf2 : screen_buf1;
+    
+    // Константы для области отрисовки
+    const int start_y = 30; // Начинаем стирать с этой координаты Y
+    const int draw_height = DISPLAY_HEIGHT - start_y;
+    
+    // Частичное стирание фона (только нужная область)
+    memset(draw_buf + (start_y * DISPLAY_WIDTH), 
+           0, 
+           sizeof(uint16_t) * DISPLAY_WIDTH * draw_height);
+    
+    // Рисуем сетку (если нужно)
+    draw_grid();
+    
+    // Рисуем сигнал (только в активной области)
+    for (int x = 0; x < DISPLAY_WIDTH && x < BUFFER_SIZE; x++) {
+        // Масштабируем значение ADC (0-4095) в координаты экрана
+        int y = start_y + ((4095 - adc_buffer[x]) * draw_height / 4096);
+        
+        // Ограничиваем координаты
+        y = (y < start_y) ? start_y : (y >= DISPLAY_HEIGHT) ? DISPLAY_HEIGHT-1 : y;
+        
+        // Рисуем пиксель
+        draw_buf[y * DISPLAY_WIDTH + x] = ILI9341_RED;
+        
+        // Стираем предыдущее положение сигнала (если нужно)
+        if (prev_waveform[x] != y) {
+            draw_buf[prev_waveform[x] * DISPLAY_WIDTH + x] = ILI9341_BLACK;
+        }
+    }
+    
+    // Обновляем дисплей
+    swap_buffers();
+}
+*/
+/*
+void draw_waveform(uint16_t* adc_buffer) {
+    uint16_t* draw_buf = (active_buf == screen_buf1) ? screen_buf2 : screen_buf1;
+    
+    // 1. Стираем предыдущий сигнал
+    for (int x = 0; x < DISPLAY_WIDTH && x < BUFFER_SIZE; x++) {
+        if (prev_waveform[x] > 0) { // 0 - значение по умолчанию
+            draw_buf[(prev_waveform[x] - WAVEFORM_TOP) * DISPLAY_WIDTH + x] = COLOR_BLACK;
+        }
+    }
+    
+    // 2. Рисуем новый сигнал
+    for (int x = 0; x < DISPLAY_WIDTH && x < BUFFER_SIZE; x++) {
+        int y = WAVEFORM_TOP + ((4095 - adc_buffer[x]) * WAVEFORM_HEIGHT / 4096);
+        y = (y < WAVEFORM_TOP) ? WAVEFORM_TOP : 
+            (y >= DISPLAY_HEIGHT) ? DISPLAY_HEIGHT-1 : y;
+        
+        // Сохраняем новую позицию (относительно области осциллографа)
+        prev_waveform[x] = y;
+        
+        // Рисуем в буфере (учитываем смещение Y)
+        draw_buf[(y - WAVEFORM_TOP) * DISPLAY_WIDTH + x] = COLOR_BLUE;
+    }
+    
+    swap_buffers();
+}
+*/
+/*
+void draw_waveform(uint16_t* buffer) {
+    const uint16_t mid_y = 120;
+    uint16_t* current_buf = screen_buf[active_buf ^ 1];
+    
+    // Копируем фон
+    memcpy(current_buf, screen_buf[active_buf], sizeof(screen_buf[0]));
+    
+    // Рисуем новый сигнал
+    for (int i = 0; i < BUFFER_SIZE && i < 320; i++) {
+        uint16_t y = mid_y - (buffer[i] - 2048) * mid_y / 4096;
+        y = (y < 30) ? 30 : (y > 230) ? 230 : y;
+        
+        current_buf[y * 320 + i] = ILI9341_RED;
+        current_buf[(y+1) * 320 + i] = ILI9341_RED;
+        
+        // Стираем предыдущий сигнал
+        if (prev_waveform[i] != y) {
+            current_buf[prev_waveform[i] * 320 + i] = ILI9341_BLACK;
+            current_buf[(prev_waveform[i]+1) * 320 + i] = ILI9341_BLACK;
+        }
+    }
+    
+    memcpy(prev_waveform, buffer, sizeof(prev_waveform));
+    swap_buffers();
+}
+*/
+/* Публичные функции */
 
 void init_buttons(void) {
     gpio_init(BUTTON_HOLD);
@@ -107,12 +282,12 @@ void process_buttons(void) {
 void draw_grid(void) {
     for (uint16_t y = 30; y < 240; y = y + 50) {
         for (uint16_t x = 10; x < 320; x = x + 5) { 
-            ILI9341_DrawPixel(&tft, x, y, ILI9341_DARKGREY);
+            ILI9341_DrawPixel(&tft, x, y, COLOR8_GRAY);
         }
     }
     for (uint16_t x = 0; x < 320; x = x + 64) {
         for (uint16_t y = 40; y < 240; y = y + 10) { 
-            ILI9341_DrawPixel(&tft, x, y, ILI9341_DARKGREY);
+            ILI9341_DrawPixel(&tft, x, y, COLOR8_GRAY);
         }
     }
 
@@ -140,48 +315,26 @@ static void get_measurements(float *measurements){
     measurements[4] = global_buffer.duty_cycle;
 }
 
-static void get_current_adc_buffer(uint16_t* buffer){
+static void get_current_adc_buffer(uint16_t *buffer){
     buffer = global_buffer.adc_buffers[global_buffer.read_buffer];
 }
 
-static void get_voltage_constants(float* voltage_constants){
-    const float scale = global_buffer.voltage_scale;
-    const float offset = global_buffer.voltage_offset;
-    voltage_constants[0] = scale;
-    voltage_constants[1] = offset;
+static void get_voltage_constants(float *voltage_constants){
+    voltage_constants[0] = global_buffer.voltage_scale;
+    voltage_constants[1] = global_buffer.voltage_offset;
 }
 
-void draw_waveform(uint16_t *buffer, float* voltage_constants) {
-    if (!global_buffer.buffer_ready[global_buffer.read_buffer]) return;
-
-    const float scale = voltage_constants[0];
-    const float offset = voltage_constants[1];
-    const uint16_t mid_y = (tft.height) / 2;
-    
-    for (uint16_t i = 1; i < BUFFER_SIZE && i < tft.width; i++) {
-        uint16_t y1 = mid_y - (buffer[i-1] - 2048) / 4096.0f * mid_y * scale + offset;
-        uint16_t y2 = mid_y - (buffer[i] - 2048) / 4096.0f * mid_y * scale + offset;
-        
-        y1 = constrain(y1, 0, tft.height-1);
-        y2 = constrain(y2, 0, tft.height-1);
-        
-        ILI9341_DrawLine(&tft, i-1, y1 + 30, i, y2 + 30, ILI9341_RED);
-    }
+void get_values_for_draw(uint16_t *current_adc_buffer, float *measurements, float *voltage_constants){
+    get_current_adc_buffer(current_adc_buffer);
+    get_measurements(measurements);
+    get_voltage_constants(voltage_constants);
 }
 
 void draw_measurements(float *measurements) {
 
-    /*float measurements[5] = {
-        global_buffer.max_value * 3.3f / 4095,
-        global_buffer.min_value * 3.3f / 4095,
-        global_buffer.vpp * 3.3f / 4095,
-        global_buffer.frequency,
-        global_buffer.duty_cycle
-    };
-    */
-    if (!show_measurements) return;
+    //if (!show_measurements) return;
     
-    ILI9341_SetTextColor(&tft, ILI9341_WHITE, ILI9341_BLACK);
+    ILI9341_SetTextColor(&tft, COLOR8_WHITE, COLOR8_BLACK);
     ILI9341_SetTextSize(&tft, 1);
 
     // Напряжения
@@ -212,7 +365,7 @@ void draw_measurements(float *measurements) {
 void erase_measurements(float* measurements){
     //if (!show_measurements) return;
     
-    ILI9341_SetTextColor(&tft, ILI9341_BLACK, ILI9341_BLACK);
+    ILI9341_SetTextColor(&tft, COLOR8_BLACK, COLOR8_BLACK);
     ILI9341_SetTextSize(&tft, 1);
 
     // Напряжения
@@ -240,47 +393,10 @@ void erase_measurements(float* measurements){
     ILI9341_PrintFloat(&tft, measurements[4], 1);
 }
 
-void erase_waveform(uint16_t* buffer, float *voltage_constants){
-    //if (!global_buffer.buffer_ready[global_buffer.read_buffer]) return;
-
-    const float scale = voltage_constants[0];
-    const float offset = voltage_constants[1];
-    const uint16_t mid_y = (tft.height) / 2;
-    
-    for (uint16_t i = 1; i < BUFFER_SIZE && i < tft.width; i++) {
-        uint16_t y1 = mid_y - (buffer[i-1] - 2048) / 4096.0f * mid_y * scale + offset;
-        uint16_t y2 = mid_y -(buffer[i] - 2048) / 4096.0f * mid_y * scale + offset;
-        
-        y1 = constrain(y1, 0, tft.height-1);
-        y2 = constrain(y2, 0, tft.height-1);
-        
-        ILI9341_DrawLine(&tft, i-1, y1 + 30, i, y2 + 30, ILI9341_BLACK);
-    }
-}
-
-void erase_grid(void){
-    for (uint16_t y = 30; y < 240; y = y + 50) {
-        for (uint16_t x = 10; x < 320; x = x + 5) { 
-            ILI9341_DrawPixel(&tft, x, y, ILI9341_BLACK);
-        }
-    }
-    for (uint16_t x = 0; x < 320; x = x + 64) {
-        for (uint16_t y = 40; y < 240; y = y + 10) { 
-            ILI9341_DrawPixel(&tft, x, y, ILI9341_BLACK);
-        }
-    }
-}
-
-void get_values_for_draw(uint16_t *current_adc_buffer, float *measurements, float *voltage_constants){
-    get_current_adc_buffer(current_adc_buffer);
-    get_measurements(measurements);
-    get_voltage_constants(voltage_constants);
-}
-
-void display_task(void) {
+void __not_in_flash_func(core1_display_task)(void) {
+    // Инициализация дисплея
     display_init();
     init_buttons();
-    last_redraw = get_absolute_time();
     ILI9341_SetFont(&tft, *font_8x8);
 
     while (true) {
@@ -289,29 +405,28 @@ void display_task(void) {
         uint16_t *current_adc_buffer;
 
         get_values_for_draw(current_adc_buffer, measurements, voltage_constants);
-        process_buttons();
+        //process_buttons();
 
         draw_grid();
         draw_measurements(measurements);
-        if (!global_buffer.hold) draw_waveform(current_adc_buffer, voltage_constants);   
 
-        last_redraw = get_absolute_time();
-        if (should_redraw()) {
-            erase_grid();
-            erase_measurements(measurements);
-            erase_waveform(current_adc_buffer, voltage_constants);  
+        if (multicore_fifo_rvalid()) {
+            uint8_t buf_idx = multicore_fifo_pop_blocking();
+            
+            mutex_enter_blocking(&global_buffer.buffer_mutex);
+            if (global_buffer.buffer_ready[buf_idx]) {
+                draw_waveform(global_buffer.adc_buffers[buf_idx]);
+                global_buffer.buffer_ready[buf_idx] = false;
+            }
+            mutex_exit(&global_buffer.buffer_mutex);
         }
         
-        tight_loop_contents();
-
-        /*ILI9341_SetCursor(&tft, 100, 10);
-        ILI9341_Print(&tft, "HELLO WORLD!");
-        ILI9341_SetCursor(&tft, 100, 20);
-        ILI9341_Print(&tft, "hello world!");
-        ILI9341_SetCursor(&tft, 100, 30);
-        ILI9341_Print(&tft, "Dolgoprudny, ");
-        ILI9341_PrintInteger(&tft, 2025);*/
-        //ILI9341_DrawLine(&tft, 0, tft.height/2, tft.width, tft.height/2, ILI9341_WHITE);
-
+        // Обработка UI (30 FPS)
+        static absolute_time_t last_ui = 0;
+        if (absolute_time_diff_us(last_ui, get_absolute_time()) > 33333) {
+            last_ui = get_absolute_time();
+            process_buttons();
+            erase_measurements(measurements);
+        }
     }
 }

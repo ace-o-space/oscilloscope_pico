@@ -6,15 +6,15 @@
 
 int main() {
     stdio_init_all();
-    
-    // Инициализация глобального буфера
+
+    // Инициализация периферии
     buffer_init();
     
-    // Запуск обработки АЦП на ядре 1
-    multicore_launch_core1(adc_processor_task);
+    // Запуск ядра 1 с правильным указателем на функцию
+    multicore_launch_core1(core0_adc_task);
     
-    // Основной цикл на ядре 0
-    display_task();
+    // Основной цикл ядра 0
+    core1_display_task();
     
     return 0;
 }

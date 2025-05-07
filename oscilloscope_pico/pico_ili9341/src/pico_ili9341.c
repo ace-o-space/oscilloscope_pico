@@ -2,6 +2,37 @@
 #include "hardware/spi.h"
 #include "hardware/dma.h"
 #include "pico/time.h"
+#include <string.h>
+
+const uint16_t color_palette[COLOR8_COUNT] = {
+    [COLOR8_BLACK]   = 0x0000,  // RGB565
+    [COLOR8_RED]     = 0xF800,
+    [COLOR8_GREEN]   = 0x07E0,
+    [COLOR8_BLUE]    = 0x001F,
+    [COLOR8_WHITE]   = 0xFFFF,
+    [COLOR8_GRAY]    = 0x8410,
+    [COLOR8_YELLOW]  = 0xFFE0,
+    [COLOR8_CYAN]    = 0x07FF,
+    [COLOR8_MAGENTA] = 0xF81F
+};
+
+// 8-битные буферы
+color8_t frame_buf8_1[ILI9341_WIDTH * ILI9341_HEIGHT];
+color8_t frame_buf8_2[ILI9341_WIDTH * ILI9341_HEIGHT];
+
+void ILI9341_DrawBuffer8to16(ILI9341* tft, color8_t* buf8) {
+    static uint16_t scanline[ILI9341_WIDTH]; // Конвертируем построчно
+    
+    for (int y = 0; y < ILI9341_HEIGHT; y++) {
+        // Конвертация строки
+        for (int x = 0; x < ILI9341_WIDTH; x++) {
+            scanline[x] = color_palette[buf8[y * ILI9341_WIDTH + x]];
+        }
+        
+        // Отправка через DMA
+        ILI9341_DrawBufferDMA(tft, 0, y, ILI9341_WIDTH, 1, scanline);
+    }
+}
 
 // Приватные функции
 void write_command(ILI9341 *disp, uint8_t cmd) {
@@ -226,4 +257,44 @@ void ILI9341_FillScreen(ILI9341 *disp, uint16_t color) {
     }
     
     gpio_put(disp->cs_pin, 1);
+}
+
+void ILI9341_FillScreen8(ILI9341 *disp, color8_t color_index) {
+    // Только заполнение буферов (без обновления дисплея)
+    memset(frame_buf8_1, color_index, sizeof(frame_buf8_1));
+    memset(frame_buf8_2, color_index, sizeof(frame_buf8_2));
+}
+
+/*
+void ILI9341_UpdateScreen(ILI9341 *disp) {
+    // Отдельная функция для вывода на дисплей
+    uint16_t scanline[DISPLAY_WIDTH];
+    
+    for (int y = 0; y < DISPLAY_HEIGHT; y++) {
+        // Конвертация строки
+        for (int x = 0; x < DISPLAY_WIDTH; x++) {
+            scanline[x] = color_palette[active_buf8[y * DISPLAY_WIDTH + x]];
+        }
+        
+        // Отправка строки
+        ILI9341_DrawBufferDMA(disp, 0, y, DISPLAY_WIDTH, 1, scanline);
+    }
+}*/
+
+// pico_ili9341.c
+void ILI9341_SetAddressWindow(ILI9341 *disp, uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1) {
+    // Проверка границ
+    x1 = (x1 >= disp->width) ? disp->width - 1 : x1;
+    y1 = (y1 >= disp->height) ? disp->height - 1 : y1;
+
+    // Команда CASET (установка столбцов)
+    uint8_t caset_data[4] = {x0 >> 8, x0 & 0xFF, x1 >> 8, x1 & 0xFF};
+    write_command_data(disp, ILI9341_CASET, caset_data, 4);
+
+    // Команда PASET (установка строк)
+    uint8_t paset_data[4] = {y0 >> 8, y0 & 0xFF, y1 >> 8, y1 & 0xFF};
+    write_command_data(disp, ILI9341_PASET, paset_data, 4);
+
+    // Команда RAMWR (начало записи пикселей)
+    write_command(disp, ILI9341_RAMWR);
 }

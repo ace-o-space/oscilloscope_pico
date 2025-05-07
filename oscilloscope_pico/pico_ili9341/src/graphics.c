@@ -15,30 +15,27 @@ static uint16_t color565(uint8_t r, uint8_t g, uint8_t b) {
 // Настройка DMA (вызывается один раз при инициализации)
 static int dma_channel = -1;
 static dma_channel_config dma_config;
-
+static int dma_chan;
 void ILI9341_SetupDMA(ILI9341 *disp) {
     if (!disp->dma) return;
     
-    dma_channel = dma_claim_unused_channel(true);
-    dma_config = dma_channel_get_default_config(dma_channel);
-    
-    channel_config_set_transfer_data_size(&dma_config, DMA_SIZE_8);
-    channel_config_set_dreq(&dma_config, spi_get_dreq(disp->spi, true));
-    channel_config_set_read_increment(&dma_config, true);
-    channel_config_set_write_increment(&dma_config, false);
-    
-    dma_channel_configure(dma_channel, &dma_config,
-        &spi_get_hw(disp->spi)->dr, // Write address (SPI data register)
-        NULL,                       // Read address (будет устанавливаться для каждой передачи)
-        0,                          // Transfer count (будет устанавливаться)
-        false                       // Don't start yet
-    );
+    dma_chan = dma_claim_unused_channel(true);
+    dma_channel_config cfg = dma_channel_get_default_config(dma_chan);
+    channel_config_set_transfer_data_size(&cfg, DMA_SIZE_8);
+    channel_config_set_dreq(&cfg, spi_get_dreq(disp->spi, true));
+    channel_config_set_read_increment(&cfg, true);
+    channel_config_set_write_increment(&cfg, false);
 }
 
 // Оптимизированная функция для рисования буфера с DMA
-void ILI9341_DrawBufferDMA(ILI9341 *disp, uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint16_t *buffer) {
-    if (x >= disp->width || y >= disp->height) return;
-    
+void ILI9341_DrawBufferDMA(
+    ILI9341 *disp,
+    uint16_t x,
+    uint16_t y,
+    uint16_t w,
+    uint16_t h,
+    uint16_t *buffer  // Принимает указатель на uint16_t
+) {
     // Установка области вывода
     uint8_t caset_data[4] = {
         x >> 8, x & 0xFF,
@@ -52,36 +49,17 @@ void ILI9341_DrawBufferDMA(ILI9341 *disp, uint16_t x, uint16_t y, uint16_t w, ui
     };
     write_command_data(disp, ILI9341_PASET, paset_data, 4);
     
+    // Запуск DMA передачи
     write_command(disp, ILI9341_RAMWR);
     gpio_put(disp->dc_pin, 1);
     gpio_put(disp->cs_pin, 0);
     
     if (disp->dma && dma_channel >= 0) {
-        // Режим с DMA
-        size_t len = w * h * 2; // 2 байта на пиксель
-        
-        // Настройка DMA
         dma_channel_set_read_addr(dma_channel, buffer, false);
-        dma_channel_set_trans_count(dma_channel, len, true);
-        
-        // Ожидание завершения передачи
+        dma_channel_set_trans_count(dma_channel, w * h, true);
         dma_channel_wait_for_finish_blocking(dma_channel);
     } else {
-        // Программный режим (без DMA)
-        size_t pixels = w * h;
-        const uint8_t *buf = (const uint8_t*)buffer;
-        
-        // Отправка данных блоками по 32 байта для оптимизации
-        while (pixels >= 16) {
-            spi_write_blocking(disp->spi, buf, 32);
-            buf += 32;
-            pixels -= 16;
-        }
-        
-        // Остаток
-        if (pixels > 0) {
-            spi_write_blocking(disp->spi, buf, pixels * 2);
-        }
+        spi_write_blocking(disp->spi, (uint8_t*)buffer, w * h * 2);
     }
     
     gpio_put(disp->cs_pin, 1);
@@ -89,57 +67,23 @@ void ILI9341_DrawBufferDMA(ILI9341 *disp, uint16_t x, uint16_t y, uint16_t w, ui
 
 // Оптимизированная заливка прямоугольника
 void ILI9341_FillRectDMA(ILI9341 *disp, uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t color) {
-    if (x >= disp->width || y >= disp->height) return;
+    uint8_t color_buf[2] = {color >> 8, color & 0xFF};
+    uint8_t dma_buf[w * 2];
     
-    // Установка области вывода
-    uint8_t caset_data[4] = {
-        x >> 8, x & 0xFF,
-        (x + w - 1) >> 8, (x + w - 1) & 0xFF
-    };
-    write_command_data(disp, ILI9341_CASET, caset_data, 4);
+    for (int i = 0; i < w; i++) {
+        dma_buf[i*2] = color_buf[0];
+        dma_buf[i*2+1] = color_buf[1];
+    }
     
-    uint8_t paset_data[4] = {
-        y >> 8, y & 0xFF,
-        (y + h - 1) >> 8, (y + h - 1) & 0xFF
-    };
-    write_command_data(disp, ILI9341_PASET, paset_data, 4);
+    ILI9341_SetAddressWindow(disp, x, y, x+w-1, y+h-1);
     
-    write_command(disp, ILI9341_RAMWR);
-    gpio_put(disp->dc_pin, 1);
     gpio_put(disp->cs_pin, 0);
+    gpio_put(disp->dc_pin, 1);
     
-    uint8_t color_bytes[2] = {color >> 8, color & 0xFF};
-    
-    if (disp->dma && dma_channel >= 0) {
-        // DMA режим с использованием повторяющегося буфера
-        #define DMA_BUFFER_SIZE 64
-        static uint16_t dma_buffer[DMA_BUFFER_SIZE];
-        for (int i = 0; i < DMA_BUFFER_SIZE; i++) {
-            dma_buffer[i] = color;
-        }
-        
-        size_t total_pixels = w * h;
-        size_t full_blocks = total_pixels / DMA_BUFFER_SIZE;
-        size_t remainder = total_pixels % DMA_BUFFER_SIZE;
-        
-        for (size_t i = 0; i < full_blocks; i++) {
-            dma_channel_set_read_addr(dma_channel, dma_buffer, false);
-            dma_channel_set_trans_count(dma_channel, DMA_BUFFER_SIZE * 2, true);
-            dma_channel_wait_for_finish_blocking(dma_channel);
-        }
-        
-        if (remainder > 0) {
-            dma_channel_set_read_addr(dma_channel, dma_buffer, false);
-            dma_channel_set_trans_count(dma_channel, remainder * 2, true);
-            dma_channel_wait_for_finish_blocking(dma_channel);
-        }
-    } else {
-        // Программный режим
-        for (int i = 0; i < h; i++) {
-            for (int j = 0; j < w; j++) {
-                spi_write_blocking(disp->spi, color_bytes, 2);
-            }
-        }
+    for (int line = 0; line < h; line++) {
+        dma_channel_set_read_addr(dma_chan, dma_buf, true);
+        dma_channel_set_trans_count(dma_chan, w*2, true);
+        dma_channel_wait_for_finish_blocking(dma_chan);
     }
     
     gpio_put(disp->cs_pin, 1);
@@ -179,8 +123,10 @@ void ILI9341_DrawLine(ILI9341 *disp, uint16_t x0, uint16_t y0, uint16_t x1, uint
         }
     }
 }
-void ILI9341_DrawPixel(ILI9341 *disp, uint16_t x, uint16_t y, uint16_t color){
-    ILI9341_DrawLine(disp, x, y, x, y, color);
+
+void ILI9341_DrawPixel(ILI9341 *disp, uint16_t x, uint16_t y, color8_t color) {
+    if (x >= disp->width || y >= disp->height) return;
+    frame_buffer[y * disp->width + x] = color;
 }
 
 // Оптимизированное рисование прямоугольника

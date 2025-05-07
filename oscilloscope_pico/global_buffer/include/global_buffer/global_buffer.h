@@ -1,9 +1,10 @@
 #pragma once
 #include <pico/stdlib.h>
 #include <pico/mutex.h>
+#include <pico/sync.h>
 
-#define BUFFER_SIZE 1000
-#define NUM_BUFFERS 3
+#define BUFFER_SIZE 320
+#define NUM_BUFFERS 2
 
 typedef struct {
     uint16_t adc_buffers[NUM_BUFFERS][BUFFER_SIZE];
@@ -35,10 +36,12 @@ typedef struct {
     // Состояние
     bool hold;
     bool running;
+
 } GlobalBuffer;
 
 extern GlobalBuffer global_buffer;
 
+void buffer_init(); 
 void buffer_init();
 void buffer_swap();
 void buffer_process();

@@ -1,11 +1,14 @@
 #pragma once
-#include "pico/stdlib.h"
+#include <stdint.h>
+#include <stdbool.h>
 
+void adc_start(void);
+bool adc_get_buffer(uint16_t** buffer);  // Возвращает успех и записывает указатель
 // Инициализация подсистемы АЦП
 void adc_processor_init();
 
 // Основная задача обработки АЦП (запускается на ядре 1)
-void adc_processor_task();
+void core0_adc_task();
 
 // Функции для управления параметрами захвата
 void set_sample_rate(uint32_t rate_khz);

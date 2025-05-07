@@ -3,6 +3,97 @@
 #include <hardware/adc.h>
 #include <hardware/dma.h>
 #include <hardware/irq.h>
+#include <pico/multicore.h>
+
+static int dma_chan;
+static volatile bool adc_running = false;
+extern void buffer_update_stats(uint16_t* buffer);
+extern bool check_trigger(uint16_t* buffer);
+extern void buffer_process();
+
+void adc_dma_handler() {
+    if (dma_channel_get_irq0_status(dma_chan)) {
+        dma_channel_acknowledge_irq0(dma_chan);
+        
+        mutex_enter_blocking(&global_buffer.buffer_mutex);
+        
+        uint8_t filled_buf = global_buffer.write_buffer;
+        global_buffer.buffer_ready[filled_buf] = true;
+        
+        global_buffer.write_buffer = (filled_buf + 1) % NUM_BUFFERS;
+        mutex_exit(&global_buffer.buffer_mutex);
+        
+        multicore_fifo_push_blocking(filled_buf);
+        
+        dma_channel_set_write_addr(dma_chan, 
+            global_buffer.adc_buffers[global_buffer.write_buffer], 
+            true);
+    }
+}
+
+void adc_processor_init() {
+    adc_init();
+    adc_gpio_init(26);
+    adc_select_input(0);
+    adc_fifo_setup(true, true, 1, false, false);
+    
+    dma_chan = dma_claim_unused_channel(true);
+    dma_channel_config cfg = dma_channel_get_default_config(dma_chan);
+    channel_config_set_transfer_data_size(&cfg, DMA_SIZE_16);
+    channel_config_set_read_increment(&cfg, false);
+    channel_config_set_write_increment(&cfg, true);
+    channel_config_set_dreq(&cfg, DREQ_ADC);
+    
+    dma_channel_configure(dma_chan, &cfg,
+        global_buffer.adc_buffers[0],
+        &adc_hw->fifo,
+        BUFFER_SIZE,
+        false
+    );
+    
+    irq_set_exclusive_handler(DMA_IRQ_0, adc_dma_handler);
+    dma_channel_set_irq0_enabled(dma_chan, true);
+    irq_set_enabled(DMA_IRQ_0, true);
+    
+    adc_set_clkdiv(0);
+    global_buffer.sample_rate = 500000; // 500 kHz
+}
+
+void adc_start() {
+    if (!global_buffer.running) {
+        adc_run(true);
+        dma_channel_start(dma_chan);
+        adc_running = true;
+        global_buffer.running = true;
+    }
+}
+
+void adc_stop() {
+    if (adc_running) {
+        adc_run(false);
+        dma_channel_abort(dma_chan);
+        adc_running = false;
+        global_buffer.running = false;
+    }
+}
+
+void core0_adc_task() {
+    adc_processor_init();
+    adc_start();
+    
+    while (true) {
+        __wfe();
+        //buffer_process();
+        //tight_loop_contents();
+    }
+}
+
+
+/*#include "adc_driver/adc_driver.h"
+#include "global_buffer/global_buffer.h"
+#include <hardware/adc.h>
+#include <hardware/dma.h>
+#include <hardware/irq.h>
 #include <math.h>
 
 static int dma_chan;
@@ -11,6 +102,63 @@ static volatile bool adc_running = false;
 extern void buffer_update_stats(uint16_t* buffer);
 extern bool check_trigger(uint16_t* buffer);
 extern void buffer_process();
+
+static uint16_t smooth_median(uint16_t *buffer, uint16_t new_value) {
+    static uint16_t window[MEDIAN_WINDOW] = {0};
+    static uint8_t idx = 0;
+    uint16_t temp[MEDIAN_WINDOW];
+
+    window[idx++] = new_value;
+    idx %= MEDIAN_WINDOW;
+
+    // Копируем и сортируем окно
+    memcpy(temp, window, sizeof(window));
+    bubble_sort(temp, MEDIAN_WINDOW);  // Нужна простая сортировка
+
+    return temp[MEDIAN_WINDOW / 2];  // Возвращаем медиану
+}
+
+void adc_dma_handler() {
+    if (dma_channel_get_irq0_status(dma_chan)) {
+        dma_channel_acknowledge_irq0(dma_chan);
+        
+        mutex_enter_blocking(&global_buffer.buffer_mutex);
+        
+        // Переключение буферов
+        global_buffer.processing_buffer = global_buffer.write_buffer;
+        global_buffer.buffer_ready[global_buffer.processing_buffer] = true;
+        global_buffer.write_buffer = (global_buffer.write_buffer + 1) % NUM_BUFFERS;
+        
+        mutex_exit(&global_buffer.buffer_mutex);
+        
+        // Перезапуск DMA с новым буфером
+        dma_channel_set_write_addr(dma_chan, 
+            global_buffer.adc_buffers[global_buffer.write_buffer], true);
+        dma_channel_set_trans_count(dma_chan, BUFFER_SIZE, true);
+    }
+}
+
+
+// Добавляем фильтр скользящего среднего
+/*
+static uint16_t apply_filter(uint16_t new_sample) {
+    static uint16_t filter_window[FILTER_WINDOW] = {0};
+    static uint8_t filter_index = 0;
+    static uint32_t filter_sum = 0;
+    
+    // Удаляем старое значение из суммы
+    filter_sum -= filter_window[filter_index];
+    
+    // Добавляем новое значение
+    filter_window[filter_index] = new_sample;
+    filter_sum += new_sample;
+    
+    // Обновляем индекс
+    filter_index = (filter_index + 1) % FILTER_WINDOW;
+    
+    // Возвращаем среднее значение
+    return (uint16_t)(filter_sum / FILTER_WINDOW);
+}
 
 void adc_dma_handler() {
     if (dma_channel_get_irq0_status(dma_chan)) {
@@ -81,7 +229,7 @@ void adc_stop() {
     }
 }
 
-/*void buffer_process() {
+void buffer_process() {
     for (int i = 0; i < NUM_BUFFERS; i++) {
         if (global_buffer.buffer_ready[i]) {
             mutex_enter_blocking(&global_buffer.buffer_mutex);
@@ -107,7 +255,7 @@ void adc_stop() {
             mutex_exit(&global_buffer.buffer_mutex);
         }
     }
-}*/
+}
 
 
 /*bool check_trigger(uint16_t* buffer) {
@@ -125,10 +273,9 @@ void adc_stop() {
         }
     }
     return false;
-}*/
+}
 
 
-/*
 static void buffer_update_stats(uint16_t* buffer) {
     uint16_t min = 4095, max = 0;
     uint32_t sum = 0;
@@ -159,7 +306,7 @@ static void buffer_update_stats(uint16_t* buffer) {
         global_buffer.duty_cycle = 50.0; // Упрощённо, нужен более точный расчёт
     }
 }
-*/
+
 
 void adc_processor_task() {
     adc_processor_init();
@@ -170,3 +317,4 @@ void adc_processor_task() {
         tight_loop_contents();
     }
 }
+*/

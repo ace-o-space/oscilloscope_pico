@@ -48,6 +48,9 @@
         "irq.h": "c",
         "time.h": "c",
         "compare": "c",
-        "cstdint": "c"
+        "cstdint": "c",
+        "dma.h": "c",
+        "multicore.h": "c",
+        "string.h": "c"
     }
 }

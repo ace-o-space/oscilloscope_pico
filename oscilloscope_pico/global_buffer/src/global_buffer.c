@@ -45,6 +45,7 @@ void buffer_init() {
     global_buffer.running = false;
 }
 
+
 void buffer_swap() {
     mutex_enter_blocking(&global_buffer.buffer_mutex);
     
