@@ -31,11 +31,11 @@ static bool show_measurements = true;
 
 static color8_t* active_buf8 = frame_buf8_1;
 static color8_t* draw_buf8 = frame_buf8_2;
-
-static uint16_t screen_buf1[DISPLAY_WIDTH * WAVEFORM_HEIGHT]; // Только область осциллографа
-static uint16_t screen_buf2[DISPLAY_WIDTH * WAVEFORM_HEIGHT];
-static uint16_t* active_buf = screen_buf1;
 static uint16_t prev_waveform[DISPLAY_WIDTH]; // Хранит предыдущие Y-координаты
+
+// static uint16_t screen_buf1[DISPLAY_WIDTH * WAVEFORM_HEIGHT]; // Только область осциллографа
+// static uint16_t screen_buf2[DISPLAY_WIDTH * WAVEFORM_HEIGHT];
+// static uint16_t* active_buf = screen_buf1;
 
 // Двойной буфер экрана (2 отдельных массива)
 //static uint16_t screen_buf1[DISPLAY_WIDTH * DISPLAY_HEIGHT];
@@ -63,16 +63,13 @@ void display_init(void) {
 
     // Инициализация дисплея
     ILI9341_Init(&tft, &config);
+    ILI9341_SetFont(&tft, *font_8x8);
     ILI9341_SetRotation(&tft, 3);
-    ILI9341_FillScreen8(&tft, COLOR8_BLACK);
+    ILI9341_FillScreen(&tft, COLOR8_BLACK);
 
     // Очистка буферов
     memset(frame_buf8_1, COLOR8_BLACK, sizeof(frame_buf8_1));
     memset(frame_buf8_2, COLOR8_BLACK, sizeof(frame_buf8_2));
-    
-    // Инициализация дисплея
-    ILI9341_Init(&tft, &config);
-    ILI9341_FillScreen8(&tft, color_palette[COLOR8_BLACK]);
 }
 
 void swap_buffers() {
@@ -108,8 +105,8 @@ void draw_grid(void) {
             ILI9341_DrawPixel(&tft, x, y, COLOR8_GRAY);
         }
     }
-    for (uint16_t x = 0; x < 320; x = x + 64) {
-        for (uint16_t y = 40; y < 240; y = y + 10) { 
+    for (uint16_t x = 0; x < DISPLAY_HEIGHT; x = x + 64) {
+        for (uint16_t y = 40; y < DISPLAY_WIDTH; y = y + 10) { 
             ILI9341_DrawPixel(&tft, x, y, COLOR8_GRAY);
         }
     }
@@ -136,6 +133,7 @@ void draw_waveform(uint16_t* adc_data) {
         //}
     }
     
+    draw_grid();
     swap_buffers();
 }
 
@@ -279,34 +277,6 @@ void process_buttons(void) {
     }
 }
 
-void draw_grid(void) {
-    for (uint16_t y = 30; y < 240; y = y + 50) {
-        for (uint16_t x = 10; x < 320; x = x + 5) { 
-            ILI9341_DrawPixel(&tft, x, y, COLOR8_GRAY);
-        }
-    }
-    for (uint16_t x = 0; x < 320; x = x + 64) {
-        for (uint16_t y = 40; y < 240; y = y + 10) { 
-            ILI9341_DrawPixel(&tft, x, y, COLOR8_GRAY);
-        }
-    }
-
-    // Вертикальные линии
-    /*for (uint16_t x = 0; x < tft.width; x += 32) {
-        ILI9341_DrawLine(&tft, x, 0, x, tft.height, ILI9341_DARKGREY);
-    }
-    
-    // Горизонтальные линии
-    for (uint16_t y = 0; y < tft.height; y += 24) {
-        ILI9341_DrawLine(&tft, 0, y, tft.width, y, ILI9341_DARKGREY);
-    }
-    
-    // Центральные оси
-    ILI9341_DrawLine(&tft, 0, tft.height/2, tft.width, tft.height/2, ILI9341_WHITE);
-    ILI9341_DrawLine(&tft, tft.width/2, 0, tft.width/2, tft.height, ILI9341_WHITE);
-    */
-}
-
 static void get_measurements(float *measurements){
     measurements[0] = global_buffer.max_value * 3.3f / 4095;
     measurements[1] = global_buffer.min_value * 3.3f / 4095;
@@ -397,7 +367,6 @@ void __not_in_flash_func(core1_display_task)(void) {
     // Инициализация дисплея
     display_init();
     init_buttons();
-    ILI9341_SetFont(&tft, *font_8x8);
 
     while (true) {
         float measurements[5];
@@ -426,7 +395,7 @@ void __not_in_flash_func(core1_display_task)(void) {
         if (absolute_time_diff_us(last_ui, get_absolute_time()) > 33333) {
             last_ui = get_absolute_time();
             process_buttons();
-            erase_measurements(measurements);
+            //erase_measurements(measurements);
         }
     }
 }

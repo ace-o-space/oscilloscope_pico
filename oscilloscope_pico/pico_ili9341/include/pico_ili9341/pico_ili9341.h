@@ -2,8 +2,8 @@
 #include "pico/stdlib.h"
 #include "hardware/spi.h"
 
-#define ILI9341_WIDTH  240
-#define ILI9341_HEIGHT 320
+#define ILI9341_WIDTH  320
+#define ILI9341_HEIGHT 240
 
 //Цвета в формате RGB565
 //#define ILI9341_BLACK       0x0000      /*   0,   0,   0 */
@@ -93,7 +93,7 @@ void ILI9341_Init(ILI9341 *disp, const ILI9341Config *config);
 void ILI9341_SetRotation(ILI9341 *disp, uint8_t rotation);
 
 // Основные функции
-void ILI9341_SetRotation(ILI9341 *disp, uint8_t rotation);
+//void ILI9341_SetRotation(ILI9341 *disp, display_rotation_t rotation);
 void ILI9341_FillScreen(ILI9341 *disp, uint16_t color);
 void ILI9341_FillScreen8(ILI9341 *disp, color8_t color_index);
 void ILI9341_DrawPixel(ILI9341 *disp, uint16_t x, uint16_t y, color8_t color);
