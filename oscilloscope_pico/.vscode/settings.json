@@ -51,6 +51,7 @@
         "cstdint": "c",
         "dma.h": "c",
         "multicore.h": "c",
-        "string.h": "c"
+        "string.h": "c",
+        "display_driver.h": "c"
     }
 }

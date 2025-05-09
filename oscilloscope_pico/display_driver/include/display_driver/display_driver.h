@@ -23,12 +23,12 @@ void core1_display_task(void);  // Правильное объявление д�
 
 #define DISPLAY_WIDTH  ILI9341_WIDTH
 #define DISPLAY_HEIGHT ILI9341_HEIGHT
-#define WAVEFORM_WIDTH  ILI9341_WIDTH
-#define WAVEFORM_HEIGHT (DISPLAY_HEIGHT - WAVEFORM_TOP)
-#define WAVEFORM_TOP  30
+#define WAVEFORM_WIDTH  ILI9341_HEIGHT
+#define WAVEFORM_HEIGHT (DISPLAY_WIDTH - WAVEFORM_TOP)
+#define WAVEFORM_TOP  50
 
 
-// Состояния меню
+// Состояния мен
 typedef enum {
     MENU_NONE,
     MENU_TIME_SCALE,

@@ -26,22 +26,14 @@
 static ILI9341 tft;
 static MenuState menu_state = MENU_NONE;
 static bool show_measurements = true;
-//static uint16_t frame_buffer[DISPLAY_WIDTH * DISPLAY_HEIGHT];
-//static uint16_t prev_waveform[DISPLAY_WIDTH];
-
-static color8_t* active_buf8 = frame_buf8_1;
-static color8_t* draw_buf8 = frame_buf8_2;
+absolute_time_t last_redraw;
 static uint16_t prev_waveform[DISPLAY_WIDTH]; // Хранит предыдущие Y-координаты
 
-// static uint16_t screen_buf1[DISPLAY_WIDTH * WAVEFORM_HEIGHT]; // Только область осциллографа
-// static uint16_t screen_buf2[DISPLAY_WIDTH * WAVEFORM_HEIGHT];
-// static uint16_t* active_buf = screen_buf1;
-
-// Двойной буфер экрана (2 отдельных массива)
-//static uint16_t screen_buf1[DISPLAY_WIDTH * DISPLAY_HEIGHT];
-//static uint16_t screen_buf2[DISPLAY_WIDTH * DISPLAY_HEIGHT];
-//static uint16_t screen_buf2[DISPLAY_WIDTH];
-//static uint16_t* active_buf = screen_buf1;  // Указатель на активный буфер
+// 8-битные буферы только для области осциллографа (WAVEFORM_HEIGHT = 210, WAVEFORM_WIDTH = 320)
+color8_t waveform_buf1[WAVEFORM_WIDTH * WAVEFORM_HEIGHT];
+color8_t waveform_buf2[WAVEFORM_WIDTH * WAVEFORM_HEIGHT];
+color8_t* active_wave_buf = waveform_buf1;
+color8_t* draw_wave_buf = waveform_buf2;
 
 extern void ILI9341_FillRectDMA(ILI9341 *disp, uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t color);
 extern bool adc_get_buffer(uint16_t** buffer);
@@ -66,20 +58,31 @@ void display_init(void) {
     ILI9341_SetFont(&tft, *font_8x8);
     ILI9341_SetRotation(&tft, 3);
     ILI9341_FillScreen(&tft, COLOR8_BLACK);
+    //ILI9341_SetPalette(&tft, 0x28);
 
     // Очистка буферов
-    memset(frame_buf8_1, COLOR8_BLACK, sizeof(frame_buf8_1));
-    memset(frame_buf8_2, COLOR8_BLACK, sizeof(frame_buf8_2));
+    memset(waveform_buf1, COLOR8_BLACK, sizeof(waveform_buf1));
+    memset(waveform_buf2, COLOR8_BLACK, sizeof(waveform_buf2));
 }
 
 void swap_buffers() {
     // Меняем буферы местами
-    color8_t* temp = active_buf8;
-    active_buf8 = draw_buf8;
-    draw_buf8 = temp;
+    color8_t* temp = active_wave_buf;
+    active_wave_buf = draw_wave_buf;
+    draw_wave_buf = temp;
     
     // Конвертируем и выводим
-    ILI9341_DrawBuffer8to16(&tft, active_buf8);
+    ILI9341_DrawBuffer8to16(&tft, active_wave_buf);
+}
+
+void swap_wave_buffers() {
+    // Меняем буферы волны местами
+    color8_t* temp = active_wave_buf;
+    active_wave_buf = draw_wave_buf;
+    draw_wave_buf = temp;
+    
+    ILI9341_DrawBuffer8to16(&tft, active_wave_buf);
+
 }
 
 /*
@@ -100,43 +103,52 @@ void swap_buffers(void) {
 */
 
 void draw_grid(void) {
-    for (uint16_t y = 30; y < DISPLAY_WIDTH; y = y + 50) {
-        for (uint16_t x = 10; x < DISPLAY_HEIGHT; x = x + 5) { 
-            ILI9341_DrawPixel(&tft, x, y, COLOR8_GRAY);
-        }
-    }
-    for (uint16_t x = 0; x < DISPLAY_HEIGHT; x = x + 64) {
-        for (uint16_t y = 40; y < DISPLAY_WIDTH; y = y + 10) { 
-            ILI9341_DrawPixel(&tft, x, y, COLOR8_GRAY);
+    //сетка
+    for (int y = 0; y < WAVEFORM_HEIGHT; y += 50) {
+        for (int x = 10; x < WAVEFORM_WIDTH; x += 5) {
+            draw_wave_buf[y * WAVEFORM_WIDTH + x] = COLOR8_GRAY;
         }
     }
 }
 
 void draw_waveform(uint16_t* adc_data) {
-    // 1. Очищаем только область осциллографа
-    memset(draw_buf8 + WAVEFORM_TOP * DISPLAY_WIDTH, 
-           COLOR8_BLACK, 
-           DISPLAY_WIDTH * WAVEFORM_HEIGHT);
+    // Очищаем буфер рисования (только область осциллографа)
+    memset(draw_wave_buf, COLOR8_BLACK, sizeof(waveform_buf1));
+    
+    draw_grid();
+
+    // Сигнал
+    for (int x = 0; x < WAVEFORM_WIDTH; x++) {
+        int y = ((4095 - adc_data[x]) * WAVEFORM_HEIGHT / 4096);
+        draw_wave_buf[y * WAVEFORM_WIDTH + x] = COLOR8_RED;
+    }
+}
+
+/*
+void draw_waveform(uint16_t* adc_data) {
+    // 1. Очищаем только область осциллографа (WAVEFORM_HEIGHT = 210, WAVEFORM_WIDTH = 320)
+    // Начинаем с адреса после верхней полосы (WAVEFORM_TOP = 30)
+    // Очищаем область: 320 (ширина) x 210 (высота)
+    for (int i = 0; i < DISPLAY_WIDTH; i++) {
+        memset(draw_buf8 + i * DISPLAY_HEIGHT, 
+               COLOR8_BLACK, 
+               WAVEFORM_WIDTH);
+    }
     
     // 2. Рисуем сигнал
-    for (int x = 0; x < DISPLAY_WIDTH && x < BUFFER_SIZE; x++) {
-        int y = WAVEFORM_TOP + ((4095 - adc_data[x]) * WAVEFORM_HEIGHT / 4096);
-        y = (y < WAVEFORM_TOP) ? WAVEFORM_TOP : 
-            (y >= DISPLAY_HEIGHT) ? DISPLAY_HEIGHT-1 : y;
-        
+    for (int y = 0; y < WAVEFORM_WIDTH; y++) {
+        int x = WAVEFORM_TOP + ((4095 - adc_data[y]) * WAVEFORM_HEIGHT / 4096);
+        //x = (x < WAVEFORM_TOP) ? WAVEFORM_TOP : 
+            //(x >= DISPLAY_HEIGHT) ? DISPLAY_HEIGHT-1 : x;
+       
         // Пиксель сигнала
-        draw_buf8[y * DISPLAY_WIDTH + x] = COLOR8_RED;
-        
-        // Подсветка (опционально)
-        //if (x % 2 == 0) {
-        //    draw_buf8[(y+1) * DISPLAY_WIDTH + x] = COLOR8_RED;
-        //}
+        draw_buf8[x * DISPLAY_HEIGHT + y] = COLOR8_WHITE;
     }
     
     draw_grid();
     swap_buffers();
 }
-
+*/
 /*
 void draw_waveform(uint16_t* adc_buffer) {
     // Определяем буфер для рисования
@@ -278,11 +290,13 @@ void process_buttons(void) {
 }
 
 static void get_measurements(float *measurements){
-    measurements[0] = global_buffer.max_value * 3.3f / 4095;
-    measurements[1] = global_buffer.min_value * 3.3f / 4095;
-    measurements[2] = global_buffer.vpp * 3.3f / 4095;
+    mutex_enter_blocking(&global_buffer.buffer_mutex);
+    measurements[0] = global_buffer.max_value;
+    measurements[1]= global_buffer.min_value;
+    measurements[2] = global_buffer.vpp;
     measurements[3] = global_buffer.frequency;
     measurements[4] = global_buffer.duty_cycle;
+    mutex_exit(&global_buffer.buffer_mutex);
 }
 
 static void get_current_adc_buffer(uint16_t *buffer){
@@ -301,101 +315,135 @@ void get_values_for_draw(uint16_t *current_adc_buffer, float *measurements, floa
 }
 
 void draw_measurements(float *measurements) {
-
-    //if (!show_measurements) return;
+    // Безопасное получение текущих измерений
+    //mutex_enter_blocking(&global_buffer.buffer_mutex);
+    float v_max = measurements[0] * 3.3f / 4095;
+    float v_min = measurements[1] * 3.3f / 4095;
+    float v_pp = measurements[2] * 3.3f / 4095;
+    float freq = measurements[3];
+    float duty = measurements[4];
+    //mutex_exit(&global_buffer.buffer_mutex);
     
+    // Отрисовка
     ILI9341_SetTextColor(&tft, COLOR8_WHITE, COLOR8_BLACK);
     ILI9341_SetTextSize(&tft, 1);
-
-    // Напряжения
-    ILI9341_SetCursor(&tft, 0, 0);
-    ILI9341_Print(&tft, "Vmax,V: ");
-    ILI9341_PrintFloat(&tft, measurements[0], 2);
     
-    ILI9341_SetCursor(&tft, 0, 10);
+    ILI9341_SetCursor(&tft, 0, 210);
+    ILI9341_Print(&tft, "Vmax,V: ");
+    ILI9341_PrintFloat(&tft, v_max, 2);
+    
+    ILI9341_SetCursor(&tft, 0, 220);
     ILI9341_Print(&tft, "Vmin,V: ");
-    ILI9341_PrintFloat(&tft, measurements[1], 2);
+    ILI9341_PrintFloat(&tft, v_min, 2);
 
-    ILI9341_SetCursor(&tft, 0, 20);
+    ILI9341_SetCursor(&tft, 0, 230);
     ILI9341_Print(&tft, "Vpp,V: ");
-    ILI9341_PrintFloat(&tft, measurements[2], 2);
+    ILI9341_PrintFloat(&tft, v_pp, 2);
 
     // Частота и скважность
-    ILI9341_SetCursor(&tft, 150, 0);
+    ILI9341_SetCursor(&tft, 150, 210);
     ILI9341_Print(&tft, "Freq,Hz: ");
     char freq_buf[16];
-    snprintf(freq_buf, sizeof(freq_buf), "%d", measurements[3]);
+    snprintf(freq_buf, sizeof(freq_buf), "%d", freq);
     ILI9341_Print(&tft, freq_buf);
 
-    ILI9341_SetCursor(&tft, 150, 10);
+    ILI9341_SetCursor(&tft, 150, 220);
     ILI9341_Print(&tft, "Duty,%: ");
-    ILI9341_PrintFloat(&tft, measurements[4], 1);
+    ILI9341_PrintFloat(&tft, duty, 1);
 }
 
-void erase_measurements(float* measurements){
-    //if (!show_measurements) return;
+// void draw_measurements(float *measurements) {
+
+//     //if (!show_measurements) return;
     
-    ILI9341_SetTextColor(&tft, COLOR8_BLACK, COLOR8_BLACK);
-    ILI9341_SetTextSize(&tft, 1);
+//     ILI9341_SetTextColor(&tft, COLOR8_WHITE, COLOR8_BLACK);
+//     ILI9341_SetTextSize(&tft, 1);
 
-    // Напряжения
-    ILI9341_SetCursor(&tft, 0, 0);
-    ILI9341_Print(&tft, "Vmax, V: ");
-    ILI9341_PrintFloat(&tft, measurements[0], 2);
+//     // Напряжения
+//     ILI9341_SetCursor(&tft, 0, 210);
+//     ILI9341_Print(&tft, "Vmax,V: ");
+//     ILI9341_PrintFloat(&tft, measurements[0], 2);
     
-    ILI9341_SetCursor(&tft, 0, 10);
-    ILI9341_Print(&tft, "Vmin, V: ");
-    ILI9341_PrintFloat(&tft, measurements[1], 2);
+//     ILI9341_SetCursor(&tft, 0, 220);
+//     ILI9341_Print(&tft, "Vmin,V: ");
+//     ILI9341_PrintFloat(&tft, measurements[1], 2);
 
-    ILI9341_SetCursor(&tft, 0, 20);
-    ILI9341_Print(&tft, "Vpp, V: ");
-    ILI9341_PrintFloat(&tft, measurements[2], 2);
+//     ILI9341_SetCursor(&tft, 0, 230);
+//     ILI9341_Print(&tft, "Vpp,V: ");
+//     ILI9341_PrintFloat(&tft, measurements[2], 2);
 
-    // Частота и скважность
-    ILI9341_SetCursor(&tft, 100, 0);
-    ILI9341_Print(&tft, "Freq, Hz: ");
-    char freq_buf[16];
-    snprintf(freq_buf, sizeof(freq_buf), "%d", measurements[3]);
-    ILI9341_Print(&tft, freq_buf);
+//     // Частота и скважность
+//     ILI9341_SetCursor(&tft, 150, 210);
+//     ILI9341_Print(&tft, "Freq,Hz: ");
+//     char freq_buf[16];
+//     snprintf(freq_buf, sizeof(freq_buf), "%d", measurements[3]);
+//     ILI9341_Print(&tft, freq_buf);
 
-    ILI9341_SetCursor(&tft, 100, 10);
-    ILI9341_Print(&tft, "Duty, %: ");
-    ILI9341_PrintFloat(&tft, measurements[4], 1);
+//     ILI9341_SetCursor(&tft, 150, 220);
+//     ILI9341_Print(&tft, "Duty,%: ");
+//     ILI9341_PrintFloat(&tft, measurements[4], 1);
+// }
+
+void render_frame() {
+    // 1. Получаем текущий буфер для отображения
+    mutex_enter_blocking(&global_buffer.buffer_mutex);
+    uint8_t buf_to_display = global_buffer.display_buffer;
+    bool live_mode = global_buffer.live_update;
+    mutex_exit(&global_buffer.buffer_mutex);
+    
+    // 2. Отрисовка измерений (всегда актуальные)
+    float measurements[5];
+    get_measurements(measurements); // Читает из global_buffer
+    
+    draw_measurements(measurements);
+    
+    // 3. Отрисовка волны
+    if (live_mode || !global_buffer.hold) {
+        draw_waveform(global_buffer.adc_buffers[buf_to_display]);
+        swap_wave_buffers();
+    }
 }
 
-void __not_in_flash_func(core1_display_task)(void) {
-    // Инициализация дисплея
+void set_hold(bool enable) {
+    mutex_enter_blocking(&global_buffer.buffer_mutex);
+    global_buffer.hold = enable;
+    
+    // При выходе из hold переключаем на последний буфер
+    if (!enable) {
+        global_buffer.display_buffer = global_buffer.write_buffer;
+    }
+    mutex_exit(&global_buffer.buffer_mutex);
+}
+
+void set_live_update(bool enable) {
+    mutex_enter_blocking(&global_buffer.buffer_mutex);
+    global_buffer.live_update = enable;
+    mutex_exit(&global_buffer.buffer_mutex);
+}
+
+void core1_display_task() {
     display_init();
     init_buttons();
-
-    while (true) {
-        float measurements[5];
-        float voltage_constants[2];
-        uint16_t *current_adc_buffer;
-
-        get_values_for_draw(current_adc_buffer, measurements, voltage_constants);
-        //process_buttons();
-
-        draw_grid();
-        draw_measurements(measurements);
-
+    
+    const uint32_t target_fps = 120;
+    const uint32_t frame_delay_us = 1000000 / target_fps;
+    
+    while (1) {
+        absolute_time_t frame_start = get_absolute_time();
+        
+        // Обработка новых данных
         if (multicore_fifo_rvalid()) {
             uint8_t buf_idx = multicore_fifo_pop_blocking();
-            
-            mutex_enter_blocking(&global_buffer.buffer_mutex);
-            if (global_buffer.buffer_ready[buf_idx]) {
-                draw_waveform(global_buffer.adc_buffers[buf_idx]);
-                global_buffer.buffer_ready[buf_idx] = false;
-            }
-            mutex_exit(&global_buffer.buffer_mutex);
+            buffer_process(buf_idx);
         }
         
-        // Обработка UI (30 FPS)
-        static absolute_time_t last_ui = 0;
-        if (absolute_time_diff_us(last_ui, get_absolute_time()) > 33333) {
-            last_ui = get_absolute_time();
-            process_buttons();
-            //erase_measurements(measurements);
-        }
+        // Рендеринг
+        render_frame();
+        
+        // Обработка UI
+        process_buttons();
+        
+        // Поддержание FPS
+        busy_wait_until(frame_start + frame_delay_us);
     }
 }

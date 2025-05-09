@@ -6,6 +6,13 @@
 
 GlobalBuffer global_buffer;
 
+uint16_t* buffer_get_current() {
+    mutex_enter_blocking(&global_buffer.buffer_mutex);
+    uint16_t* buf = global_buffer.adc_buffers[global_buffer.read_buffer];
+    mutex_exit(&global_buffer.buffer_mutex);
+    return buf;
+}
+
 void buffer_init() {
     mutex_init(&global_buffer.buffer_mutex);
     
@@ -35,7 +42,7 @@ void buffer_init() {
     
     // Измерения
     global_buffer.max_value = 0;
-    global_buffer.min_value = 4095;
+    global_buffer.min_value = 0;
     global_buffer.vpp = 0;
     global_buffer.frequency = 0;
     global_buffer.duty_cycle = 0.0f;

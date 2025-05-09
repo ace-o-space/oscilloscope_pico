@@ -2,8 +2,8 @@
 #include "pico/stdlib.h"
 #include "hardware/spi.h"
 
-#define ILI9341_WIDTH  320
-#define ILI9341_HEIGHT 240
+#define ILI9341_WIDTH  240
+#define ILI9341_HEIGHT 320
 
 //Цвета в формате RGB565
 //#define ILI9341_BLACK       0x0000      /*   0,   0,   0 */
@@ -58,9 +58,6 @@ enum {
 // Таблица преобразования в RGB565 (хранится во Flash)
 extern const uint16_t color_palette[COLOR8_COUNT];
 
-extern color8_t frame_buf8_1[ILI9341_WIDTH * ILI9341_HEIGHT];
-extern color8_t frame_buf8_2[ILI9341_WIDTH * ILI9341_HEIGHT];
-
 typedef struct {
     spi_inst_t *spi;
     uint cs_pin;
@@ -95,11 +92,12 @@ void ILI9341_SetRotation(ILI9341 *disp, uint8_t rotation);
 // Основные функции
 //void ILI9341_SetRotation(ILI9341 *disp, display_rotation_t rotation);
 void ILI9341_FillScreen(ILI9341 *disp, uint16_t color);
-void ILI9341_FillScreen8(ILI9341 *disp, color8_t color_index);
+void ILI9341_FillScreen8(ILI9341 *disp, color8_t color_index);\
 void ILI9341_DrawPixel(ILI9341 *disp, uint16_t x, uint16_t y, color8_t color);
 void ILI9341_DrawLine(ILI9341 *disp, uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1, uint16_t color);
 void ILI9341_DrawRect(ILI9341 *disp, uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t color);
 void ILI9341_FillRect(ILI9341 *disp, uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t color);
+void ILI9341_SetPalette(ILI9341 *disp, uint8_t mac_data);
 
 // Текст
 void ILI9341_SetFont(ILI9341 *disp, const uint8_t *font);

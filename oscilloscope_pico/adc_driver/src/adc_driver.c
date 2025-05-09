@@ -11,19 +11,25 @@ extern void buffer_update_stats(uint16_t* buffer);
 extern bool check_trigger(uint16_t* buffer);
 extern void buffer_process();
 
+
 void adc_dma_handler() {
     if (dma_channel_get_irq0_status(dma_chan)) {
         dma_channel_acknowledge_irq0(dma_chan);
         
         mutex_enter_blocking(&global_buffer.buffer_mutex);
-        
         uint8_t filled_buf = global_buffer.write_buffer;
+        
+        // Всегда обновляем display_buffer в live-режиме
+        if (global_buffer.live_update && !global_buffer.hold) {
+            global_buffer.display_buffer = filled_buf;
+        }
+        
+        // Переключаем буфер
+        global_buffer.write_buffer = (filled_buf + 1) % NUM_BUFFERS;
         global_buffer.buffer_ready[filled_buf] = true;
         
-        global_buffer.write_buffer = (filled_buf + 1) % NUM_BUFFERS;
-        mutex_exit(&global_buffer.buffer_mutex);
-        
         multicore_fifo_push_blocking(filled_buf);
+        mutex_exit(&global_buffer.buffer_mutex);
         
         dma_channel_set_write_addr(dma_chan, 
             global_buffer.adc_buffers[global_buffer.write_buffer], 
