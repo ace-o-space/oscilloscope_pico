@@ -85,22 +85,6 @@ void swap_wave_buffers() {
 
 }
 
-/*
-void swap_buffers(void) {
-    // Переключаем активный буфер
-    active_buf = (active_buf == screen_buf1) ? screen_buf2 : screen_buf1;
-    
-    // Отправляем только область осциллографа
-    ILI9341_DrawBufferDMA(
-        &tft,
-        0, 
-        WAVEFORM_TOP, // Начинаем с Y=30
-        DISPLAY_WIDTH,
-        WAVEFORM_HEIGHT,  // Только 290 строк (320-30)
-        active_buf
-    );
-}
-*/
 
 void draw_grid(void) {
     //сетка
@@ -124,123 +108,6 @@ void draw_waveform(uint16_t* adc_data) {
     }
 }
 
-/*
-void draw_waveform(uint16_t* adc_data) {
-    // 1. Очищаем только область осциллографа (WAVEFORM_HEIGHT = 210, WAVEFORM_WIDTH = 320)
-    // Начинаем с адреса после верхней полосы (WAVEFORM_TOP = 30)
-    // Очищаем область: 320 (ширина) x 210 (высота)
-    for (int i = 0; i < DISPLAY_WIDTH; i++) {
-        memset(draw_buf8 + i * DISPLAY_HEIGHT, 
-               COLOR8_BLACK, 
-               WAVEFORM_WIDTH);
-    }
-    
-    // 2. Рисуем сигнал
-    for (int y = 0; y < WAVEFORM_WIDTH; y++) {
-        int x = WAVEFORM_TOP + ((4095 - adc_data[y]) * WAVEFORM_HEIGHT / 4096);
-        //x = (x < WAVEFORM_TOP) ? WAVEFORM_TOP : 
-            //(x >= DISPLAY_HEIGHT) ? DISPLAY_HEIGHT-1 : x;
-       
-        // Пиксель сигнала
-        draw_buf8[x * DISPLAY_HEIGHT + y] = COLOR8_WHITE;
-    }
-    
-    draw_grid();
-    swap_buffers();
-}
-*/
-/*
-void draw_waveform(uint16_t* adc_buffer) {
-    // Определяем буфер для рисования
-    uint16_t* draw_buf = (active_buf == screen_buf1) ? screen_buf2 : screen_buf1;
-    
-    // Константы для области отрисовки
-    const int start_y = 30; // Начинаем стирать с этой координаты Y
-    const int draw_height = DISPLAY_HEIGHT - start_y;
-    
-    // Частичное стирание фона (только нужная область)
-    memset(draw_buf + (start_y * DISPLAY_WIDTH), 
-           0, 
-           sizeof(uint16_t) * DISPLAY_WIDTH * draw_height);
-    
-    // Рисуем сетку (если нужно)
-    draw_grid();
-    
-    // Рисуем сигнал (только в активной области)
-    for (int x = 0; x < DISPLAY_WIDTH && x < BUFFER_SIZE; x++) {
-        // Масштабируем значение ADC (0-4095) в координаты экрана
-        int y = start_y + ((4095 - adc_buffer[x]) * draw_height / 4096);
-        
-        // Ограничиваем координаты
-        y = (y < start_y) ? start_y : (y >= DISPLAY_HEIGHT) ? DISPLAY_HEIGHT-1 : y;
-        
-        // Рисуем пиксель
-        draw_buf[y * DISPLAY_WIDTH + x] = ILI9341_RED;
-        
-        // Стираем предыдущее положение сигнала (если нужно)
-        if (prev_waveform[x] != y) {
-            draw_buf[prev_waveform[x] * DISPLAY_WIDTH + x] = ILI9341_BLACK;
-        }
-    }
-    
-    // Обновляем дисплей
-    swap_buffers();
-}
-*/
-/*
-void draw_waveform(uint16_t* adc_buffer) {
-    uint16_t* draw_buf = (active_buf == screen_buf1) ? screen_buf2 : screen_buf1;
-    
-    // 1. Стираем предыдущий сигнал
-    for (int x = 0; x < DISPLAY_WIDTH && x < BUFFER_SIZE; x++) {
-        if (prev_waveform[x] > 0) { // 0 - значение по умолчанию
-            draw_buf[(prev_waveform[x] - WAVEFORM_TOP) * DISPLAY_WIDTH + x] = COLOR_BLACK;
-        }
-    }
-    
-    // 2. Рисуем новый сигнал
-    for (int x = 0; x < DISPLAY_WIDTH && x < BUFFER_SIZE; x++) {
-        int y = WAVEFORM_TOP + ((4095 - adc_buffer[x]) * WAVEFORM_HEIGHT / 4096);
-        y = (y < WAVEFORM_TOP) ? WAVEFORM_TOP : 
-            (y >= DISPLAY_HEIGHT) ? DISPLAY_HEIGHT-1 : y;
-        
-        // Сохраняем новую позицию (относительно области осциллографа)
-        prev_waveform[x] = y;
-        
-        // Рисуем в буфере (учитываем смещение Y)
-        draw_buf[(y - WAVEFORM_TOP) * DISPLAY_WIDTH + x] = COLOR_BLUE;
-    }
-    
-    swap_buffers();
-}
-*/
-/*
-void draw_waveform(uint16_t* buffer) {
-    const uint16_t mid_y = 120;
-    uint16_t* current_buf = screen_buf[active_buf ^ 1];
-    
-    // Копируем фон
-    memcpy(current_buf, screen_buf[active_buf], sizeof(screen_buf[0]));
-    
-    // Рисуем новый сигнал
-    for (int i = 0; i < BUFFER_SIZE && i < 320; i++) {
-        uint16_t y = mid_y - (buffer[i] - 2048) * mid_y / 4096;
-        y = (y < 30) ? 30 : (y > 230) ? 230 : y;
-        
-        current_buf[y * 320 + i] = ILI9341_RED;
-        current_buf[(y+1) * 320 + i] = ILI9341_RED;
-        
-        // Стираем предыдущий сигнал
-        if (prev_waveform[i] != y) {
-            current_buf[prev_waveform[i] * 320 + i] = ILI9341_BLACK;
-            current_buf[(prev_waveform[i]+1) * 320 + i] = ILI9341_BLACK;
-        }
-    }
-    
-    memcpy(prev_waveform, buffer, sizeof(prev_waveform));
-    swap_buffers();
-}
-*/
 /* Публичные функции */
 
 void init_buttons(void) {
@@ -351,38 +218,6 @@ void draw_measurements(float *measurements) {
     ILI9341_Print(&tft, "Duty,%: ");
     ILI9341_PrintFloat(&tft, duty, 1);
 }
-
-// void draw_measurements(float *measurements) {
-
-//     //if (!show_measurements) return;
-    
-//     ILI9341_SetTextColor(&tft, COLOR8_WHITE, COLOR8_BLACK);
-//     ILI9341_SetTextSize(&tft, 1);
-
-//     // Напряжения
-//     ILI9341_SetCursor(&tft, 0, 210);
-//     ILI9341_Print(&tft, "Vmax,V: ");
-//     ILI9341_PrintFloat(&tft, measurements[0], 2);
-    
-//     ILI9341_SetCursor(&tft, 0, 220);
-//     ILI9341_Print(&tft, "Vmin,V: ");
-//     ILI9341_PrintFloat(&tft, measurements[1], 2);
-
-//     ILI9341_SetCursor(&tft, 0, 230);
-//     ILI9341_Print(&tft, "Vpp,V: ");
-//     ILI9341_PrintFloat(&tft, measurements[2], 2);
-
-//     // Частота и скважность
-//     ILI9341_SetCursor(&tft, 150, 210);
-//     ILI9341_Print(&tft, "Freq,Hz: ");
-//     char freq_buf[16];
-//     snprintf(freq_buf, sizeof(freq_buf), "%d", measurements[3]);
-//     ILI9341_Print(&tft, freq_buf);
-
-//     ILI9341_SetCursor(&tft, 150, 220);
-//     ILI9341_Print(&tft, "Duty,%: ");
-//     ILI9341_PrintFloat(&tft, measurements[4], 1);
-// }
 
 void render_frame() {
     // 1. Получаем текущий буфер для отображения

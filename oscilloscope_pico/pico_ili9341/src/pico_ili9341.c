@@ -188,17 +188,6 @@ void ILI9341_Init(ILI9341 *disp, const ILI9341Config *config) {
     
     // Display ON
     write_command(disp, 0x29);    // Display ON
-
-    // //Жёстко фиксируем ориентацию (как было в рабочей версии)
-    // uint8_t madctl = 0x28; // Портретная ориентация (0°)
-    // write_command(disp, ILI9341_MADCTL);
-    // write_data(disp, &madctl, 1);
-
-    // //Формат пикселя (16-bit)
-    // uint8_t pixel_format = 0x55;
-    // write_command(disp, 0x3A); // COLMOD
-    // write_data(disp, &pixel_format, 1);
-
 }
 
 
@@ -237,41 +226,6 @@ void ILI9341_SetRotation(ILI9341 *disp, uint8_t rotation) {
     disp->rotation = rotation;
 }
 
-
-// void ILI9341_SetRotation(ILI9341 *disp, uint8_t rotation) {
-//     uint8_t madctl = 0;
-    
-//     switch(rotation) {
-//         case 1:
-//             madctl = 0x28;  // MX=1, MV=0, MY=0
-//             disp->width = 320;
-//             disp->height = 240;
-//             break;
-//         case 2:
-//             madctl = 0x48;  // MX=0, MV=1, MY=0
-//             disp->width = 240;
-//             disp->height = 320;
-//             break;
-//         case 3:
-//             madctl = 0x88;  // MX=1, MV=0, MY=1
-//             disp->width = 320;
-//             disp->height = 240;
-//             break;
-//         case 4:
-//             madctl = 0xE8;  // MX=1, MV=1, MY=1
-//             disp->width = 240;
-//             disp->height = 320;
-//             break;
-//     }
-    
-//     write_command(disp, ILI9341_MADCTL);
-//     write_data(disp, &madctl, 1);
-    
-//     // Обновляем геометрию
-//     disp->rotation = rotation;
-// }
-
-
 void ILI9341_FillScreen(ILI9341 *disp, uint16_t color) {
     uint8_t color_bytes[2] = {color >> 8, color & 0xFF};
     
@@ -308,61 +262,6 @@ void ILI9341_FillScreen(ILI9341 *disp, uint16_t color) {
 void ILI9341_SetPalette(ILI9341 *disp, uint8_t mac_data){
     write_data(disp, &mac_data, 1);
 }
-
-// void ILI9341_FillScreen(ILI9341 *disp, uint16_t color) {
-//     uint8_t color_bytes[2] = {color >> 8, color & 0xFF};
-    
-//     // Установка области заполнения
-//     uint8_t caset_data[4] = {0x00, 0x00, disp->width >> 8, disp->width & 0xFF};
-//     write_command_data(disp, ILI9341_CASET, caset_data, 4);
-    
-//     uint8_t paset_data[4] = {0x00, 0x00, disp->height >> 8, disp->height & 0xFF};
-//     write_command_data(disp, ILI9341_PASET, paset_data, 4);
-    
-//     // Заполнение цветом
-//     write_command(disp, ILI9341_RAMWR);
-//     gpio_put(disp->dc_pin, 1);
-//     gpio_put(disp->cs_pin, 0);
-    
-//     if (disp->dma) {
-//         // DMA-версия для быстрой заливки
-//         uint16_t buffer[64];
-//         for (int i = 0; i < 64; i++) buffer[i] = color;
-        
-//         for (int i = 0; i < (disp->width * disp->height) / 64; i++) {
-//             spi_write_blocking(disp->spi, (uint8_t*)buffer, 128);
-//         }
-//     } else {
-//         // Программная версия
-//         for (int i = 0; i < disp->width * disp->height; i++) {
-//             spi_write_blocking(disp->spi, color_bytes, 2);
-//         }
-//     }
-    
-//     gpio_put(disp->cs_pin, 1);
-// }
-
-// void ILI9341_FillScreen8(ILI9341 *disp, color8_t color_index) {
-//     // Только заполнение буферов (без обновления дисплея)
-//     memset(frame_buf8_1, color_index, sizeof(frame_buf8_1));
-//     memset(frame_buf8_2, color_index, sizeof(frame_buf8_2));
-// }
-
-/*
-void ILI9341_UpdateScreen(ILI9341 *disp) {
-    // Отдельная функция для вывода на дисплей
-    uint16_t scanline[DISPLAY_WIDTH];
-    
-    for (int y = 0; y < DISPLAY_HEIGHT; y++) {
-        // Конвертация строки
-        for (int x = 0; x < DISPLAY_WIDTH; x++) {
-            scanline[x] = color_palette[active_buf8[y * DISPLAY_WIDTH + x]];
-        }
-        
-        // Отправка строки
-        ILI9341_DrawBufferDMA(disp, 0, y, DISPLAY_WIDTH, 1, scanline);
-    }
-}*/
 
 // pico_ili9341.c
 void ILI9341_SetAddressWindow(ILI9341 *disp, uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1) {

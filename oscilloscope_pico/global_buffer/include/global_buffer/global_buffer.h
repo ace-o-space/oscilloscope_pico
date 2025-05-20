@@ -7,8 +7,6 @@
 #define NUM_BUFFERS 2
 
 typedef struct {
-    // uint16_t adc_buffers[NUM_BUFFERS][BUFFER_SIZE];
-    // volatile uint8_t write_buffer;
     volatile uint8_t read_buffer;
     // volatile uint8_t processing_buffer;
     volatile bool buffer_ready[NUM_BUFFERS];
